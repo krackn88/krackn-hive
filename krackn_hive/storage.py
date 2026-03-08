@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .lifecycle import can_transition
 from .models import AgentState, AgentRole, Caste, HiveAgent, HiveArtifact, HiveSignal, HiveTask, SignalKind, TaskState, lease_until, utc_now
+from .models import AgentState, AgentRole, Caste, HiveAgent, HiveArtifact, HiveSignal, HiveTask, SignalKind, TaskState, utc_now
 
 
 class InvalidTransitionError(ValueError):
@@ -33,6 +34,9 @@ class CombRepository:
         task = HiveTask(
             task_id=task_id,
             idempotency_key=idempotency_key,
+    async def create_task(self, task_id: str, goal: str, priority: float, constraints: dict) -> HiveTask:
+        task = HiveTask(
+            task_id=task_id,
             goal=goal,
             priority=priority,
             status=TaskState.discovered,
@@ -76,6 +80,12 @@ class CombRepository:
         if target_state in {TaskState.done, TaskState.archived, TaskState.rejected}:
             task.lease_owner = None
             task.lease_expires_at = None
+    async def update_task_state(self, task_id: str, state: TaskState) -> HiveTask | None:
+        task = await self.get_task(task_id)
+        if not task:
+            return None
+        task.status = state
+        task.updated_at = utc_now()
         await self.session.commit()
         await self.session.refresh(task)
         return task
@@ -88,6 +98,10 @@ class CombRepository:
             task.status = TaskState.planned
         await self.transition_task(task_id, TaskState.assigned)
         task = await self.get_task(task_id)
+    async def assign_task(self, task_id: str, agent_id: str) -> HiveTask | None:
+        task = await self.get_task(task_id)
+        if not task:
+            return None
         assigned = list(task.assigned_json)
         if agent_id not in assigned:
             assigned.append(agent_id)
@@ -106,6 +120,7 @@ class CombRepository:
         if task.lease_owner != agent_id:
             return None
         task.lease_expires_at = lease_until(lease_seconds)
+        task.status = TaskState.assigned
         task.updated_at = utc_now()
         await self.session.commit()
         await self.session.refresh(task)
@@ -116,6 +131,7 @@ class CombRepository:
         signal_id: str,
         task_id: str,
         kind: SignalKind,
+        kind,
         source_agent_id: str,
         score: float,
         confidence: float,
@@ -133,6 +149,9 @@ class CombRepository:
         signal = HiveSignal(
             signal_id=signal_id,
             idempotency_key=idempotency_key,
+    ) -> HiveSignal:
+        signal = HiveSignal(
+            signal_id=signal_id,
             task_id=task_id,
             kind=kind,
             source_agent_id=source_agent_id,
@@ -169,6 +188,7 @@ class CombRepository:
             await self.session.refresh(existing)
             return existing
 
+    async def register_agent(self, agent_id: str, caste: Caste, capabilities: list[str], sandbox_profile: str) -> HiveAgent:
         agent = HiveAgent(
             agent_id=agent_id,
             caste=caste,
@@ -227,6 +247,9 @@ class CombRepository:
         artifact = HiveArtifact(
             artifact_id=artifact_id,
             idempotency_key=idempotency_key,
+    async def create_artifact(self, artifact_id: str, task_id: str, producer_agent_id: str, kind: str, metadata: dict) -> HiveArtifact:
+        artifact = HiveArtifact(
+            artifact_id=artifact_id,
             task_id=task_id,
             producer_agent_id=producer_agent_id,
             kind=kind,
@@ -246,6 +269,7 @@ class CombRepository:
                 HiveTask.lease_expires_at.is_not(None),
                 HiveTask.lease_expires_at < cutoff,
             )
+            select(HiveTask).where(HiveTask.status.in_([TaskState.assigned, TaskState.active]), HiveTask.updated_at < cutoff)
         )
         stale = list(result.scalars().all())
         for task in stale:

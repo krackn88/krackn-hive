@@ -24,6 +24,7 @@ Repository includes:
 - lifecycle-safe transitions with transition guardrails
 - best-signal lookup per task
 - assignment + lease ownership/expiry, agent heartbeat, stale-assignment abandonment
+- assignment, agent heartbeat, stale-assignment abandonment
 - role upsert/lookup and task-state summary
 
 ### 3) Nectar Economy + Pheromone Intelligence
@@ -31,6 +32,7 @@ Repository includes:
 - `RewardEngine` evaluates score/confidence/trust vs cost
 - signal budget checks convert over-budget opportunities to warnings
 - task dispatch prioritizes task priority + signal quality and issues per-assignment leases
+- task dispatch prioritizes task priority + signal quality
 
 ### 4) Task Lifecycle + Abandonment
 - explicit state machine in `lifecycle.py`
@@ -58,6 +60,15 @@ Repository includes:
 - `GET /api/summary` – task counts by state
 - `POST /api/tasks/{task_id}/lease/renew` – renew active task lease
 - `POST /api/abandonment/sweep` – reclaim expired leases
+- `POST /api/tasks` – create + triage a task
+- `POST /api/tasks/{task_id}/transition` – move task through state machine
+- `POST /api/signals` – emit waggle signals
+- `POST /api/tasks/{task_id}/artifacts` – submit artifact for guard validation
+- `POST /api/roles` – register/update role capabilities
+- `POST /api/dispatch/{role_name}` – role-aware dispatch decision
+- `POST /api/agents` – register/update agent profile
+- `GET /api/summary` – task counts by state
+- `POST /api/abandonment/sweep` – reclaim stale assignments
 
 ## Run
 
@@ -68,5 +79,6 @@ uvicorn krackn_hive.main:app --reload
 ## Next upgrades
 - Replace in-memory bus with Redis/Kafka adapter in runtime composition
 - Add ack/retry delivery semantics for worker execution events
+- Add task leases and ack/retry semantics
 - Add OTel traces + metrics
 - Add signed provenance/attestation emission for artifact approvals

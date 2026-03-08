@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .abandonment import TaskAbandonmentService
@@ -45,6 +46,11 @@ async def deps(session: AsyncSession = Depends(get_session)) -> tuple[HiveSwarmS
 
 
 def _task_read(task) -> TaskRead:
+@router.post("/tasks", response_model=TaskRead)
+async def create_task(data: TaskCreate, bundle=Depends(deps)) -> TaskRead:
+    swarm, repo, _, _ = bundle
+    task_id = await swarm.submit_task(goal=data.goal, priority=data.priority, constraints=data.constraints)
+    task = await repo.get_task(task_id)
     return TaskRead(
         task_id=task.task_id,
         goal=task.goal,
@@ -93,6 +99,9 @@ async def renew_lease(task_id: str, agent_id: str = Query(...), lease_seconds: i
     return {"task_id": task.task_id, "lease_expires_at": task.lease_expires_at.isoformat()}
 
 
+    )
+
+
 @router.post("/signals")
 async def emit_signal(data: SignalCreate, bundle=Depends(deps)) -> dict[str, str]:
     swarm, repo, _, _ = bundle
@@ -124,11 +133,13 @@ async def create_role(data: RoleCreate, bundle=Depends(deps)) -> RoleRead:
 
 @router.post("/dispatch/{role_name}")
 async def dispatch(role_name: str, lease_seconds: int = Query(300, ge=30, le=3600), bundle=Depends(deps)) -> dict[str, str]:
+async def dispatch(role_name: str, bundle=Depends(deps)) -> dict[str, str]:
     swarm, repo, _, _ = bundle
     role = await repo.get_role(role_name)
     if role is None:
         raise HTTPException(status_code=404, detail="role not found")
     task_id = await swarm.assign_next(role=role, global_budget=settings.global_budget_tokens, lease_seconds=lease_seconds)
+    task_id = await swarm.assign_next(role=role, global_budget=settings.global_budget_tokens)
     if task_id is None:
         raise HTTPException(status_code=404, detail="no assignable task")
     return {"task_id": task_id}

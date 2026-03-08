@@ -8,6 +8,14 @@ from krackn_hive.policies import PolicyEngine
 from krackn_hive.scoring import NectarBudget, RewardEngine
 from krackn_hive.schemas import CloudEvent, EstimatedCost, EventType, SignalCreate, TaskCreate
 from krackn_hive.scheduler import NectarEconomyScheduler
+from krackn_hive.models import TaskState
+from krackn_hive.policies import PolicyEngine
+from krackn_hive.scoring import NectarBudget, RewardEngine
+from krackn_hive.schemas import CloudEvent, EstimatedCost, SignalCreate
+from krackn_hive.scheduler import NectarEconomyScheduler
+from krackn_hive.policies import PolicyEngine
+from krackn_hive.scoring import NectarBudget, RewardEngine
+from krackn_hive.schemas import CloudEvent, EstimatedCost, SignalCreate
 
 
 def test_inmemory_event_bus_pattern_delivery():
@@ -24,6 +32,7 @@ def test_inmemory_event_bus_pattern_delivery():
             CloudEvent(
                 id="e1",
                 type=EventType.task_created.value,
+                type="hive.task.created",
                 source="test",
                 time=datetime.now(timezone.utc),
                 data={"task_id": "t1"},
@@ -31,6 +40,7 @@ def test_inmemory_event_bus_pattern_delivery():
         )
         ev = await asyncio.wait_for(consumer, timeout=1)
         assert ev.type == EventType.task_created.value
+        assert ev.type == "hive.task.created"
 
     asyncio.run(scenario())
 

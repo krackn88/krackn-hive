@@ -25,6 +25,10 @@ else:
 
     def ConfigDict(**kwargs):  # type: ignore
         return kwargs
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import AgentState, Caste, SignalKind, TaskState
 
@@ -100,6 +104,11 @@ class ArtifactSubmit(BaseModel):
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str | None = None
+    score: float = Field(ge=0, le=1)
+    confidence: float = Field(ge=0, le=1)
+    estimated_cost: EstimatedCost = Field(default_factory=EstimatedCost)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    summary: str = ""
 
 
 class RoleCreate(BaseModel):
