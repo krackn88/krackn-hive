@@ -2,6 +2,12 @@ import asyncio
 from datetime import datetime, timezone
 
 from krackn_hive.event_bus import InMemoryEventBus
+from krackn_hive.lifecycle import can_transition
+from krackn_hive.models import TaskState
+from krackn_hive.policies import PolicyEngine
+from krackn_hive.scoring import NectarBudget, RewardEngine
+from krackn_hive.schemas import CloudEvent, EstimatedCost, SignalCreate
+from krackn_hive.scheduler import NectarEconomyScheduler
 from krackn_hive.policies import PolicyEngine
 from krackn_hive.scoring import NectarBudget, RewardEngine
 from krackn_hive.schemas import CloudEvent, EstimatedCost, SignalCreate
@@ -51,3 +57,15 @@ def test_reward_engine_budget_and_rank():
     )
     assert reward.within_budget(signal)
     assert reward.rank(signal) > 0
+
+
+def test_task_lifecycle_transition_guards():
+    assert can_transition(TaskState.discovered, TaskState.triaged)
+    assert not can_transition(TaskState.discovered, TaskState.done)
+
+
+def test_scheduler_allocates_by_role_fraction():
+    scheduler = NectarEconomyScheduler()
+    scout_budget = scheduler.budget_for_role(global_budget=100, role="scout", queued_tasks=50)
+    worker_budget = scheduler.budget_for_role(global_budget=100, role="worker", queued_tasks=50)
+    assert worker_budget > scout_budget

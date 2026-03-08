@@ -7,11 +7,23 @@ from .abandonment import TaskAbandonmentService
 from .config import settings
 from .db import get_session
 from .event_bus import InMemoryEventBus
+from .policies import PolicyEngine
 from .registry import AgentRoleRegistry
-from .schemas import AgentRead, AgentRegister, RoleCreate, RoleRead, SignalCreate, TaskCreate, TaskRead
+from .schemas import (
+    AgentRead,
+    AgentRegister,
+    ArtifactSubmit,
+    HiveSummary,
+    RoleCreate,
+    RoleRead,
+    SignalCreate,
+    TaskCreate,
+    TaskRead,
+    TaskTransition,
+)
 from .scheduler import NectarEconomyScheduler
 from .scoring import NectarBudget, RewardEngine
-from .storage import CombRepository
+from .storage import CombRepository, InvalidTransitionError
 from .swarm import HiveSwarmService
 
 router = APIRouter()
@@ -25,6 +37,7 @@ async def deps(session: AsyncSession = Depends(get_session)) -> tuple[HiveSwarmS
         event_bus=_event_bus,
         scheduler=NectarEconomyScheduler(),
         reward=RewardEngine(NectarBudget(max_tokens_per_task=settings.global_budget_tokens * 1000)),
+        policy=PolicyEngine(),
     )
     registry = AgentRoleRegistry(session)
     abandonment = TaskAbandonmentService(repo, _event_bus, settings.abandonment_ttl_seconds)

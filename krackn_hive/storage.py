@@ -2,10 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import AgentState, AgentRole, Caste, HiveAgent, HiveArtifact, HiveSignal, HiveTask, TaskState, utc_now
+from .lifecycle import can_transition
+from .models import AgentState, AgentRole, Caste, HiveAgent, HiveArtifact, HiveSignal, HiveTask, SignalKind, TaskState, utc_now
+
+
+class InvalidTransitionError(ValueError):
+    pass
 
 
 class CombRepository:
