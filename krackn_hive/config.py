@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/krackn_hive"
     abandonment_ttl_seconds: int = 900
     global_budget_tokens: int = 100
+    event_bus: str = "memory"  # "memory" or "redis"
     model_config = SettingsConfigDict(env_prefix="KRACKN_", env_file=".env", extra="ignore")
 
 

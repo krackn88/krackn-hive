@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .abandonment import TaskAbandonmentService
 from .config import settings
 from .db import get_session
-from .event_bus import InMemoryEventBus
+from .event_bus import get_event_bus
 from .policies import PolicyEngine
 from .registry import AgentRoleRegistry
 from .scheduler import NectarEconomyScheduler
@@ -27,20 +27,20 @@ from .storage import CombRepository, InvalidTransitionError
 from .swarm import HiveSwarmService
 
 router = APIRouter()
-_event_bus = InMemoryEventBus()
 
 
 async def deps(session: AsyncSession = Depends(get_session)) -> tuple[HiveSwarmService, CombRepository, AgentRoleRegistry, TaskAbandonmentService]:
+    event_bus = get_event_bus()
     repo = CombRepository(session)
     swarm = HiveSwarmService(
         repository=repo,
-        event_bus=_event_bus,
+        event_bus=event_bus,
         scheduler=NectarEconomyScheduler(),
         reward=RewardEngine(NectarBudget(max_tokens_per_task=settings.global_budget_tokens * 1000)),
         policy=PolicyEngine(),
     )
     registry = AgentRoleRegistry(session)
-    abandonment = TaskAbandonmentService(repo, _event_bus, settings.abandonment_ttl_seconds)
+    abandonment = TaskAbandonmentService(repo, event_bus, settings.abandonment_ttl_seconds)
     return swarm, repo, registry, abandonment
 
 

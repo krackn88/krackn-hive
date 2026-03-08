@@ -11,12 +11,34 @@ try:
 except ModuleNotFoundError:
     Redis = object  # type: ignore[assignment]
 
+from .config import settings
 from .schemas import CloudEvent
 
 
 class EventBus(Protocol):
     async def publish(self, event: CloudEvent) -> None: ...
     async def subscribe(self, pattern: str) -> AsyncIterator[CloudEvent]: ...
+
+
+_bus: EventBus | None = None
+
+
+def get_event_bus() -> EventBus:
+    """Return the configured event bus (memory or Redis). Cached singleton."""
+    global _bus
+    if _bus is not None:
+        return _bus
+    if settings.event_bus == "redis":
+        try:
+            from redis.asyncio import Redis as RedisClient
+
+            redis_client = RedisClient.from_url(settings.redis_url)
+            _bus = RedisDanceFloorEventBus(redis_client)
+        except Exception:
+            _bus = InMemoryEventBus()
+    else:
+        _bus = InMemoryEventBus()
+    return _bus
 
 
 @dataclass(frozen=True)
