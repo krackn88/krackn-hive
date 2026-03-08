@@ -3,6 +3,11 @@ from datetime import datetime, timezone
 
 from krackn_hive.event_bus import InMemoryEventBus
 from krackn_hive.lifecycle import can_transition
+from krackn_hive.models import TaskState, lease_until, utc_now
+from krackn_hive.policies import PolicyEngine
+from krackn_hive.scoring import NectarBudget, RewardEngine
+from krackn_hive.schemas import CloudEvent, EstimatedCost, EventType, SignalCreate, TaskCreate
+from krackn_hive.scheduler import NectarEconomyScheduler
 from krackn_hive.models import TaskState
 from krackn_hive.policies import PolicyEngine
 from krackn_hive.scoring import NectarBudget, RewardEngine
@@ -26,6 +31,7 @@ def test_inmemory_event_bus_pattern_delivery():
         await bus.publish(
             CloudEvent(
                 id="e1",
+                type=EventType.task_created.value,
                 type="hive.task.created",
                 source="test",
                 time=datetime.now(timezone.utc),
@@ -33,6 +39,7 @@ def test_inmemory_event_bus_pattern_delivery():
             )
         )
         ev = await asyncio.wait_for(consumer, timeout=1)
+        assert ev.type == EventType.task_created.value
         assert ev.type == "hive.task.created"
 
     asyncio.run(scenario())
@@ -54,6 +61,7 @@ def test_reward_engine_budget_and_rank():
         confidence=0.75,
         estimated_cost=EstimatedCost(tokens=800, wall_seconds=30, sandbox_seconds=20),
         payload={},
+        idempotency_key="sig-1",
     )
     assert reward.within_budget(signal)
     assert reward.rank(signal) > 0
@@ -69,3 +77,14 @@ def test_scheduler_allocates_by_role_fraction():
     scout_budget = scheduler.budget_for_role(global_budget=100, role="scout", queued_tasks=50)
     worker_budget = scheduler.budget_for_role(global_budget=100, role="worker", queued_tasks=50)
     assert worker_budget > scout_budget
+
+
+def test_lease_until_generates_future_timestamp():
+    now = utc_now()
+    expiry = lease_until(120)
+    assert expiry > now
+
+
+def test_taskcreate_supports_idempotency_key():
+    task = TaskCreate(goal="demo", idempotency_key="task-1")
+    assert task.idempotency_key == "task-1"

@@ -7,6 +7,7 @@ from .event_bus import EventBus
 from .models import AgentRole, SignalKind, TaskState, utc_now
 from .policies import PolicyEngine
 from .scoring import RewardEngine
+from .schemas import ArtifactSubmit, CloudEvent, EventType, SignalCreate
 from .schemas import ArtifactSubmit, CloudEvent, SignalCreate
 from .scoring import RewardEngine
 from .schemas import CloudEvent, SignalCreate
@@ -30,6 +31,21 @@ class HiveSwarmService:
         self.reward = reward
         self.policy = policy
 
+    async def submit_task(self, goal: str, priority: float, constraints: dict, idempotency_key: str | None = None) -> str:
+        task_id = uuid.uuid4().hex
+        task = await self.repository.create_task(task_id, goal, priority, constraints, idempotency_key=idempotency_key)
+        await self.repository.transition_task(task.task_id, TaskState.triaged)
+        await self.event_bus.publish(
+            CloudEvent(
+                id=idempotency_key or uuid.uuid4().hex,
+                type=EventType.task_created.value,
+                source="hive.queen",
+                time=utc_now(),
+                subject=task.task_id,
+                data={"task_id": task.task_id, "goal": task.goal, "priority": task.priority},
+            )
+        )
+        return task.task_id
     async def submit_task(self, goal: str, priority: float, constraints: dict) -> str:
         task_id = uuid.uuid4().hex
         task = await self.repository.create_task(task_id, goal, priority, constraints)
@@ -53,6 +69,7 @@ class HiveSwarmService:
         await self.event_bus.publish(
             CloudEvent(
                 id=uuid.uuid4().hex,
+                type=EventType.task_state_changed.value,
                 type="hive.task.state_changed",
                 source="hive.queen",
                 time=utc_now(),
@@ -65,6 +82,8 @@ class HiveSwarmService:
     async def emit_signal(self, signal: SignalCreate) -> str:
         if not self.reward.within_budget(signal):
             signal = SignalCreate(**{**signal.model_dump(), "kind": SignalKind.warning, "summary": "signal over nectar budget"})
+        signal_id = uuid.uuid4().hex
+        db_signal = await self.repository.create_signal(
     async def emit_signal(self, signal: SignalCreate) -> str:
         signal_id = uuid.uuid4().hex
         await self.repository.create_signal(
@@ -77,6 +96,21 @@ class HiveSwarmService:
             estimated_cost_json=signal.estimated_cost.model_dump(),
             payload_json=signal.payload,
             summary=signal.summary,
+            idempotency_key=signal.idempotency_key,
+        )
+        await self.event_bus.publish(
+            CloudEvent(
+                id=signal.idempotency_key or uuid.uuid4().hex,
+                type=EventType.signal_emitted.value,
+                source=signal.source_agent_id,
+                time=utc_now(),
+                subject=signal.task_id,
+                data={"signal_id": db_signal.signal_id, **signal.model_dump(mode="json")},
+            )
+        )
+        return db_signal.signal_id
+
+    async def assign_next(self, role: AgentRole, global_budget: int = 50, lease_seconds: int = 300) -> str | None:
         )
         await self.event_bus.publish(
             CloudEvent(
@@ -109,6 +143,22 @@ class HiveSwarmService:
         if budget <= 0:
             return None
 
+        task = await self.repository.assign_task(selected_task_id, role.name, lease_seconds=lease_seconds)
+        if task is None:
+            return None
+        await self.event_bus.publish(
+            CloudEvent(
+                id=uuid.uuid4().hex,
+                type=EventType.task_assigned.value,
+                source="hive.queen",
+                time=utc_now(),
+                subject=task.task_id,
+                data={
+                    "task_id": task.task_id,
+                    "role": role.name,
+                    "budget": budget,
+                    "lease_expires_at": task.lease_expires_at.isoformat() if task.lease_expires_at else None,
+                },
         task = await self.repository.assign_task(selected_task_id, role.name)
         if task is None:
             return None
@@ -139,6 +189,7 @@ class HiveSwarmService:
         combined_text = artifact.content + "\n" + str(artifact.metadata)
         violations = self.policy.check_text(combined_text)
 
+        db_artifact = await self.repository.create_artifact(
         await self.repository.create_artifact(
             artifact_id=uuid.uuid4().hex,
             task_id=task_id,
@@ -146,6 +197,7 @@ class HiveSwarmService:
             kind=artifact.kind,
             metadata=artifact.metadata,
             content_sha256=content_hash,
+            idempotency_key=artifact.idempotency_key,
         )
 
         await self.repository.transition_task(task_id, TaskState.review)
@@ -153,6 +205,12 @@ class HiveSwarmService:
             await self.repository.transition_task(task_id, TaskState.active)
             await self.event_bus.publish(
                 CloudEvent(
+                    id=artifact.idempotency_key or uuid.uuid4().hex,
+                    type=EventType.artifact_rejected.value,
+                    source="hive.guard",
+                    time=utc_now(),
+                    subject=task_id,
+                    data={"task_id": task_id, "artifact_id": db_artifact.artifact_id, "violations": [v.code for v in violations]},
                     id=uuid.uuid4().hex,
                     type="hive.artifact.rejected",
                     source="hive.guard",
@@ -166,6 +224,15 @@ class HiveSwarmService:
         await self.repository.transition_task(task_id, TaskState.done)
         await self.event_bus.publish(
             CloudEvent(
+                id=artifact.idempotency_key or uuid.uuid4().hex,
+                type=EventType.artifact_approved.value,
+                source="hive.guard",
+                time=utc_now(),
+                subject=task_id,
+                data={"task_id": task_id, "artifact_id": db_artifact.artifact_id, "content_sha256": content_hash},
+            )
+        )
+        return {"status": "approved", "content_sha256": content_hash}
                 id=uuid.uuid4().hex,
                 type="hive.artifact.approved",
                 source="hive.guard",

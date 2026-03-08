@@ -2,6 +2,7 @@ from datetime import timedelta
 
 from .event_bus import EventBus
 from .models import TaskState, utc_now
+from .schemas import CloudEvent, EventType
 from .schemas import CloudEvent
 from .storage import CombRepository
 
@@ -19,6 +20,7 @@ class TaskAbandonmentService:
             await self.event_bus.publish(
                 CloudEvent(
                     id=f"abandon-{task.task_id}-{int(utc_now().timestamp())}",
+                    type=EventType.task_state_changed.value,
                     type="hive.task.state_changed",
                     source="hive.abandonment",
                     time=utc_now(),

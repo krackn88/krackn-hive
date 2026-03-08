@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import importlib.util
 import json
 from dataclasses import dataclass
 from typing import AsyncIterator, Protocol
 
+_HAS_REDIS = importlib.util.find_spec("redis") is not None
+
+if _HAS_REDIS:
+    from redis.asyncio import Redis
+else:
 try:
     from redis.asyncio import Redis
 except ModuleNotFoundError:  # optional at test-time
@@ -59,6 +65,9 @@ class RedisDanceFloorEventBus:
         self.channel = channel
 
     async def publish(self, event: CloudEvent) -> None:
+        payload = event.model_dump() if not hasattr(event, "model_dump_json") else None
+        data = json.dumps(payload) if payload is not None else event.model_dump_json()
+        await self.redis.publish(self.channel, data)
         await self.redis.publish(self.channel, event.model_dump_json())
 
     async def subscribe(self, pattern: str) -> AsyncIterator[CloudEvent]:
@@ -71,6 +80,8 @@ class RedisDanceFloorEventBus:
                 data = message.get("data")
                 if isinstance(data, bytes):
                     data = data.decode("utf-8")
+                payload = json.loads(data)
+                parsed = CloudEvent.model_validate(payload) if hasattr(CloudEvent, "model_validate") else CloudEvent(**payload)
                 parsed = CloudEvent.model_validate(json.loads(data))
                 if fnmatch.fnmatch(parsed.type, pattern):
                     yield parsed
