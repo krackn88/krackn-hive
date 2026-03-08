@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from .models import TaskState
 
-
 ALLOWED_TASK_TRANSITIONS: dict[TaskState, set[TaskState]] = {
     TaskState.discovered: {TaskState.triaged, TaskState.rejected, TaskState.archived},
     TaskState.triaged: {TaskState.planned, TaskState.rejected, TaskState.archived},

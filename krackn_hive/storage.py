@@ -6,7 +6,19 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .lifecycle import can_transition
-from .models import AgentState, AgentRole, Caste, HiveAgent, HiveArtifact, HiveSignal, HiveTask, SignalKind, TaskState, lease_until, utc_now
+from .models import (
+    AgentRole,
+    AgentState,
+    Caste,
+    HiveAgent,
+    HiveArtifact,
+    HiveSignal,
+    HiveTask,
+    SignalKind,
+    TaskState,
+    lease_until,
+    utc_now,
+)
 
 
 class InvalidTransitionError(ValueError):

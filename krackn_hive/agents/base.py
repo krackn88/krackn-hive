@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 
 from ..event_bus import EventBus
-from ..models import AgentState
 from ..storage import CombRepository
 
 

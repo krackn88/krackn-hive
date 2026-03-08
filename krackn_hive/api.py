@@ -9,6 +9,7 @@ from .db import get_session
 from .event_bus import InMemoryEventBus
 from .policies import PolicyEngine
 from .registry import AgentRoleRegistry
+from .scheduler import NectarEconomyScheduler
 from .schemas import (
     AgentRead,
     AgentRegister,
@@ -21,7 +22,6 @@ from .schemas import (
     TaskRead,
     TaskTransition,
 )
-from .scheduler import NectarEconomyScheduler
 from .scoring import NectarBudget, RewardEngine
 from .storage import CombRepository, InvalidTransitionError
 from .swarm import HiveSwarmService
