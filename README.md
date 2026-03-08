@@ -2,83 +2,89 @@
 
 **Krackn Hive** is a honey-bee inspired autonomous engineering swarm: a Queen orchestrates intent, Scouts emit discovery signals, Workers execute, Guards validate, and Drones specialize.
 
-This repo now includes a richer **production-oriented kernel** on top of **FastAPI + Postgres + Redis** patterns.
+Production-ready kernel on **FastAPI + Postgres + Redis**.
 
-## Core mechanics implemented
+## Quick start
 
-### 1) Dance Floor Event Bus
-- `InMemoryEventBus` for deterministic local runs/test
-- `RedisDanceFloorEventBus` for distributed pub/sub
-- Pattern subscriptions (`hive.task.*`, `hive.signal.*`, ...)
-- CloudEvent envelope (`id`, `type`, `source`, `subject`, trace fields)
-
-### 2) Comb Cell Storage
-Durable entities modeled for swarm operation:
-- `hive_tasks`
-- `hive_signals`
-- `hive_agents`
-- `hive_artifacts`
-- `agent_roles`
-
-Repository includes:
-- lifecycle-safe transitions with transition guardrails
-- best-signal lookup per task
-- assignment + lease ownership/expiry, agent heartbeat, stale-assignment abandonment
-- assignment, agent heartbeat, stale-assignment abandonment
-- role upsert/lookup and task-state summary
-
-### 3) Nectar Economy + Pheromone Intelligence
-- `NectarEconomyScheduler` allocates budget by role fractions
-- `RewardEngine` evaluates score/confidence/trust vs cost
-- signal budget checks convert over-budget opportunities to warnings
-- task dispatch prioritizes task priority + signal quality and issues per-assignment leases
-- task dispatch prioritizes task priority + signal quality
-
-### 4) Task Lifecycle + Abandonment
-- explicit state machine in `lifecycle.py`
-- guarded transitions (invalid transitions produce conflict errors)
-- abandonment sweeper reclaims stale active/assigned work and emits events
-
-### 5) Guardrails
-- policy engine detects denied command patterns (exfiltration/destructive shell)
-- artifact submission path computes SHA256, stores provenance metadata, and applies guard approval/rejection semantics
-
-### 6) Agent Caste Registry + Scaffolds
-- role registry persists role capabilities/concurrency
-- agent registration endpoint persists caste profiles
-- queen/scout/worker/guard/drone agent class scaffolds included for autonomous loop expansion
-
-## API surface
-
-- `POST /api/tasks` – create + triage a task (supports idempotency key)
-- `POST /api/tasks/{task_id}/transition` – move task through state machine
-- `POST /api/signals` – emit waggle signals
-- `POST /api/tasks/{task_id}/artifacts` – submit artifact for guard validation (idempotent submissions)
-- `POST /api/roles` – register/update role capabilities
-- `POST /api/dispatch/{role_name}` – role-aware dispatch decision + lease TTL
-- `POST /api/agents` – register/update agent profile
-- `GET /api/summary` – task counts by state
-- `POST /api/tasks/{task_id}/lease/renew` – renew active task lease
-- `POST /api/abandonment/sweep` – reclaim expired leases
-- `POST /api/tasks` – create + triage a task
-- `POST /api/tasks/{task_id}/transition` – move task through state machine
-- `POST /api/signals` – emit waggle signals
-- `POST /api/tasks/{task_id}/artifacts` – submit artifact for guard validation
-- `POST /api/roles` – register/update role capabilities
-- `POST /api/dispatch/{role_name}` – role-aware dispatch decision
-- `POST /api/agents` – register/update agent profile
-- `GET /api/summary` – task counts by state
-- `POST /api/abandonment/sweep` – reclaim stale assignments
-
-## Run
+### Docker (recommended)
 
 ```bash
+docker compose up -d
+# API: http://localhost:8000
+# Docs: http://localhost:8000/docs
+```
+
+### Local
+
+```bash
+# 1. Copy env and set database
+cp .env.example .env
+# Edit .env: set KRACKN_DATABASE_URL (e.g. postgres or sqlite+aiosqlite:///./hive.db)
+
+# 2. Migrate (Postgres) or create schema (SQLite via lifespan)
+alembic upgrade head   # Postgres only
+
+# 3. Run
+pip install -e .
 uvicorn krackn_hive.main:app --reload
 ```
 
-## Next upgrades
-- Replace in-memory bus with Redis/Kafka adapter in runtime composition
-- Add ack/retry delivery semantics for worker execution events
-- Add task leases and ack/retry semantics
-- Add OTel traces + metrics
-- Add signed provenance/attestation emission for artifact approvals
+## Configuration
+
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `KRACKN_DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/krackn_hive` | Database URL |
+| `KRACKN_REDIS_URL` | `redis://localhost:6379/0` | Redis URL (when event_bus=redis) |
+| `KRACKN_EVENT_BUS` | `memory` | `memory` or `redis` |
+| `KRACKN_ABANDONMENT_TTL_SECONDS` | `900` | Stale lease reclaim threshold |
+| `KRACKN_GLOBAL_BUDGET_TOKENS` | `100` | Nectar budget tuning |
+
+## Core mechanics
+
+### 1) Dance Floor Event Bus
+- `InMemoryEventBus` for local/dev
+- `RedisDanceFloorEventBus` when `KRACKN_EVENT_BUS=redis`
+- CloudEvent envelope, pattern subscriptions (`hive.task.*`, `hive.signal.*`, ...)
+
+### 2) Comb Cell Storage
+- `hive_tasks`, `hive_signals`, `hive_agents`, `hive_artifacts`, `agent_roles`
+- Lifecycle transitions, lease ownership, abandonment sweeper
+
+### 3) Nectar Economy
+- `NectarEconomyScheduler`, `RewardEngine`, budget checks, per-assignment leases
+
+### 4) Task Lifecycle + Abandonment
+- State machine in `lifecycle.py`, guarded transitions, stale-assignment reclaim
+
+### 5) Guardrails
+- Policy engine (exfiltration/destructive patterns), artifact SHA256 provenance
+
+### 6) Agent Caste Registry
+- Role registry, agent registration, queen/scout/worker/guard/drone scaffolds
+
+## API
+
+- `POST /api/tasks` – create + triage (idempotency key)
+- `POST /api/tasks/{task_id}/transition` – state transition
+- `POST /api/signals` – emit waggle signals
+- `POST /api/tasks/{task_id}/artifacts` – submit for guard validation
+- `POST /api/roles` – register role capabilities
+- `POST /api/dispatch/{role_name}` – role-aware dispatch + lease TTL
+- `POST /api/agents` – register agent
+- `GET /api/summary` – task counts by state
+- `POST /api/tasks/{task_id}/lease/renew` – renew lease
+- `POST /api/abandonment/sweep` – reclaim stale leases
+
+## Dev
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+ruff check krackn_hive tests
+```
+
+## Next
+
+- OTel traces + metrics
+- Signed provenance for artifact approvals
+- Rate limiting, auth
