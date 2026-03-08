@@ -1,0 +1,153 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .abandonment import TaskAbandonmentService
+from .config import settings
+from .db import get_session
+from .event_bus import InMemoryEventBus
+from .policies import PolicyEngine
+from .registry import AgentRoleRegistry
+from .schemas import (
+    AgentRead,
+    AgentRegister,
+    ArtifactSubmit,
+    HiveSummary,
+    RoleCreate,
+    RoleRead,
+    SignalCreate,
+    TaskCreate,
+    TaskRead,
+    TaskTransition,
+)
+from .scheduler import NectarEconomyScheduler
+from .scoring import NectarBudget, RewardEngine
+from .storage import CombRepository, InvalidTransitionError
+from .swarm import HiveSwarmService
+
+router = APIRouter()
+_event_bus = InMemoryEventBus()
+
+
+async def deps(session: AsyncSession = Depends(get_session)) -> tuple[HiveSwarmService, CombRepository, AgentRoleRegistry, TaskAbandonmentService]:
+    repo = CombRepository(session)
+    swarm = HiveSwarmService(
+        repository=repo,
+        event_bus=_event_bus,
+        scheduler=NectarEconomyScheduler(),
+        reward=RewardEngine(NectarBudget(max_tokens_per_task=settings.global_budget_tokens * 1000)),
+        policy=PolicyEngine(),
+    )
+    registry = AgentRoleRegistry(session)
+    abandonment = TaskAbandonmentService(repo, _event_bus, settings.abandonment_ttl_seconds)
+    return swarm, repo, registry, abandonment
+
+
+def _task_read(task) -> TaskRead:
+    return TaskRead(
+        task_id=task.task_id,
+        goal=task.goal,
+        status=task.status,
+        priority=task.priority,
+        constraints=task.constraints_json,
+        dependencies=task.deps_json,
+        assigned_agents=task.assigned_json,
+        lease_owner=task.lease_owner,
+        lease_expires_at=task.lease_expires_at,
+    )
+
+
+@router.post("/tasks", response_model=TaskRead)
+async def create_task(data: TaskCreate, bundle=Depends(deps)) -> TaskRead:
+    swarm, repo, _, _ = bundle
+    task_id = await swarm.submit_task(
+        goal=data.goal,
+        priority=data.priority,
+        constraints=data.constraints,
+        idempotency_key=data.idempotency_key,
+    )
+    task = await repo.get_task(task_id)
+    return _task_read(task)
+
+
+@router.post("/tasks/{task_id}/transition")
+async def transition_task(task_id: str, data: TaskTransition, bundle=Depends(deps)) -> dict[str, str]:
+    swarm, repo, _, _ = bundle
+    task = await repo.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    try:
+        state = await swarm.transition_task(task_id, data.state)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    return {"task_id": task_id, "state": state.value}
+
+
+@router.post("/tasks/{task_id}/lease/renew")
+async def renew_lease(task_id: str, agent_id: str = Query(...), lease_seconds: int = Query(300, ge=30, le=3600), bundle=Depends(deps)) -> dict[str, str]:
+    _, repo, _, _ = bundle
+    task = await repo.renew_lease(task_id=task_id, agent_id=agent_id, lease_seconds=lease_seconds)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task lease not found")
+    return {"task_id": task.task_id, "lease_expires_at": task.lease_expires_at.isoformat()}
+
+
+@router.post("/signals")
+async def emit_signal(data: SignalCreate, bundle=Depends(deps)) -> dict[str, str]:
+    swarm, repo, _, _ = bundle
+    task = await repo.get_task(data.task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    signal_id = await swarm.emit_signal(data)
+    return {"signal_id": signal_id}
+
+
+@router.post("/tasks/{task_id}/artifacts")
+async def submit_artifact(task_id: str, data: ArtifactSubmit, bundle=Depends(deps)) -> dict[str, str]:
+    swarm, repo, _, _ = bundle
+    task = await repo.get_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    try:
+        return await swarm.submit_artifact(task_id, data)
+    except InvalidTransitionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.post("/roles", response_model=RoleRead)
+async def create_role(data: RoleCreate, bundle=Depends(deps)) -> RoleRead:
+    _, _, registry, _ = bundle
+    role = await registry.register(data.name, data.capabilities, data.concurrency_limit)
+    return RoleRead(id=role.id, name=role.name, capabilities=role.capabilities_json, concurrency_limit=role.concurrency_limit)
+
+
+@router.post("/dispatch/{role_name}")
+async def dispatch(role_name: str, lease_seconds: int = Query(300, ge=30, le=3600), bundle=Depends(deps)) -> dict[str, str]:
+    swarm, repo, _, _ = bundle
+    role = await repo.get_role(role_name)
+    if role is None:
+        raise HTTPException(status_code=404, detail="role not found")
+    task_id = await swarm.assign_next(role=role, global_budget=settings.global_budget_tokens, lease_seconds=lease_seconds)
+    if task_id is None:
+        raise HTTPException(status_code=404, detail="no assignable task")
+    return {"task_id": task_id}
+
+
+@router.post("/agents", response_model=AgentRead)
+async def register_agent(data: AgentRegister, bundle=Depends(deps)) -> AgentRead:
+    _, repo, _, _ = bundle
+    agent = await repo.register_agent(data.agent_id, data.caste, data.capabilities, data.sandbox_profile)
+    return AgentRead(agent_id=agent.agent_id, caste=agent.caste, state=agent.state, capabilities=agent.capabilities_json)
+
+
+@router.get("/summary", response_model=HiveSummary)
+async def summary(bundle=Depends(deps)) -> HiveSummary:
+    _, repo, _, _ = bundle
+    return HiveSummary(**await repo.task_summary())
+
+
+@router.post("/abandonment/sweep")
+async def sweep(bundle=Depends(deps)) -> dict[str, int]:
+    _, _, _, abandonment = bundle
+    return {"abandoned": await abandonment.sweep()}
