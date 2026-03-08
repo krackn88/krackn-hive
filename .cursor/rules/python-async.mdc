@@ -1,0 +1,12 @@
+---
+description: Python async/SQLAlchemy conventions for krackn-hive
+globs: krackn_hive/**/*.py
+alwaysApply: false
+---
+
+# Python Async Conventions
+
+- Use `async def` for all DB/IO operations; use `await` for repository calls.
+- SQLAlchemy 2.0 async style: `AsyncSession`, `select()`, `await session.execute()`.
+- Use `from __future__ import annotations` at top of modules.
+- Prefer `list[...]`, `dict[str, Any]` over `List`, `Dict` from typing.

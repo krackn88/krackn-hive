@@ -1,0 +1,13 @@
+---
+description: Krackn Hive swarm architecture patterns
+globs: krackn_hive/**/*.py
+alwaysApply: true
+---
+
+# Krackn Hive Patterns
+
+- **Event bus**: Publish `CloudEvent` with `EventType` enum values (e.g. `EventType.task_created.value`), never raw strings like `"hive.task.created"` unless both are kept in sync.
+- **CloudEvent**: Single `type=` key per event; no duplicate keys.
+- **Storage/repository**: One canonical implementation per method; no merge conflict duplicates.
+- **Idempotency**: Support `idempotency_key` on task, signal, artifact create flows.
+- **Lease**: Use `lease_owner`, `lease_expires_at` for task assignments; pass `lease_seconds` through dispatch.

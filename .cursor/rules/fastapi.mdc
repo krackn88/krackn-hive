@@ -1,0 +1,12 @@
+---
+description: FastAPI and API conventions
+globs: krackn_hive/**/*.py
+alwaysApply: false
+---
+
+# FastAPI Conventions
+
+- Use `Depends()` for shared dependencies; return tuples for multi-injection (`deps`).
+- Prefer `response_model=` on routes for validation; use Pydantic schemas from `schemas.py`.
+- Raise `HTTPException(status_code=..., detail=...)` for client errors.
+- Use ` lifespan` context manager instead of deprecated `on_event("startup")`.

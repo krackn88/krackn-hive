@@ -1,31 +1,7 @@
 from __future__ import annotations
 
-import importlib.util
 from datetime import datetime
 from enum import Enum
-from typing import Any
-
-_HAS_PYDANTIC = importlib.util.find_spec("pydantic") is not None
-
-if _HAS_PYDANTIC:
-    from pydantic import BaseModel, ConfigDict, Field
-else:
-    class BaseModel:  # type: ignore[override]
-        def __init__(self, **kwargs):
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-
-        def model_dump(self, mode: str | None = None):
-            return self.__dict__.copy()
-
-    def Field(default=None, default_factory=None, ge=None, le=None):  # type: ignore
-        if default_factory is not None:
-            return default_factory()
-        return default
-
-    def ConfigDict(**kwargs):  # type: ignore
-        return kwargs
-from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -104,8 +80,8 @@ class ArtifactSubmit(BaseModel):
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     idempotency_key: str | None = None
-    score: float = Field(ge=0, le=1)
-    confidence: float = Field(ge=0, le=1)
+    score: float = Field(ge=0, le=1, default=0.5)
+    confidence: float = Field(ge=0, le=1, default=0.5)
     estimated_cost: EstimatedCost = Field(default_factory=EstimatedCost)
     payload: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
