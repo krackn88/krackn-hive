@@ -41,20 +41,11 @@ class CombRepository:
         )
         return list(result.scalars().all())
 
-    async def task_summary(self) -> dict[str, int]:
-        summary: dict[str, int] = {state.value: 0 for state in TaskState}
-        result = await self.session.execute(select(HiveTask.status, func.count(HiveTask.task_id)).group_by(HiveTask.status))
-        for status, count in result.all():
-            summary[status.value] = int(count)
-        return summary
-
-    async def transition_task(self, task_id: str, target_state: TaskState) -> HiveTask | None:
+    async def update_task_state(self, task_id: str, state: TaskState) -> HiveTask | None:
         task = await self.get_task(task_id)
         if not task:
             return None
-        if task.status != target_state and not can_transition(task.status, target_state):
-            raise InvalidTransitionError(f"invalid transition {task.status.value} -> {target_state.value}")
-        task.status = target_state
+        task.status = state
         task.updated_at = utc_now()
         await self.session.commit()
         await self.session.refresh(task)
@@ -64,14 +55,11 @@ class CombRepository:
         task = await self.get_task(task_id)
         if not task:
             return None
-        if task.status in {TaskState.discovered, TaskState.triaged}:
-            task.status = TaskState.planned
-        await self.transition_task(task_id, TaskState.assigned)
-        task = await self.get_task(task_id)
         assigned = list(task.assigned_json)
         if agent_id not in assigned:
             assigned.append(agent_id)
         task.assigned_json = assigned
+        task.status = TaskState.assigned
         task.updated_at = utc_now()
         await self.session.commit()
         await self.session.refresh(task)
@@ -81,7 +69,7 @@ class CombRepository:
         self,
         signal_id: str,
         task_id: str,
-        kind: SignalKind,
+        kind,
         source_agent_id: str,
         score: float,
         confidence: float,
@@ -106,27 +94,7 @@ class CombRepository:
         await self.session.refresh(signal)
         return signal
 
-    async def best_signal_for_task(self, task_id: str) -> HiveSignal | None:
-        result = await self.session.execute(
-            select(HiveSignal)
-            .where(HiveSignal.task_id == task_id)
-            .order_by((HiveSignal.score * HiveSignal.confidence).desc(), HiveSignal.created_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
     async def register_agent(self, agent_id: str, caste: Caste, capabilities: list[str], sandbox_profile: str) -> HiveAgent:
-        existing = await self.session.get(HiveAgent, agent_id)
-        if existing:
-            existing.caste = caste
-            existing.capabilities_json = capabilities
-            existing.sandbox_profile = sandbox_profile
-            existing.state = AgentState.idle
-            existing.last_heartbeat_at = utc_now()
-            await self.session.commit()
-            await self.session.refresh(existing)
-            return existing
-
         agent = HiveAgent(
             agent_id=agent_id,
             caste=caste,
@@ -166,22 +134,13 @@ class CombRepository:
         result = await self.session.execute(select(AgentRole).where(AgentRole.name == name))
         return result.scalar_one_or_none()
 
-    async def create_artifact(
-        self,
-        artifact_id: str,
-        task_id: str,
-        producer_agent_id: str,
-        kind: str,
-        metadata: dict,
-        content_sha256: str | None = None,
-    ) -> HiveArtifact:
+    async def create_artifact(self, artifact_id: str, task_id: str, producer_agent_id: str, kind: str, metadata: dict) -> HiveArtifact:
         artifact = HiveArtifact(
             artifact_id=artifact_id,
             task_id=task_id,
             producer_agent_id=producer_agent_id,
             kind=kind,
             metadata_json=metadata,
-            content_sha256=content_sha256,
             created_at=utc_now(),
         )
         self.session.add(artifact)

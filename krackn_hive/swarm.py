@@ -8,6 +8,8 @@ from .models import AgentRole, SignalKind, TaskState, utc_now
 from .policies import PolicyEngine
 from .scoring import RewardEngine
 from .schemas import ArtifactSubmit, CloudEvent, SignalCreate
+from .scoring import RewardEngine
+from .schemas import CloudEvent, SignalCreate
 from .scheduler import NectarEconomyScheduler
 from .storage import CombRepository
 
@@ -21,6 +23,7 @@ class HiveSwarmService:
         reward: RewardEngine,
         policy: PolicyEngine,
     ):
+    def __init__(self, repository: CombRepository, event_bus: EventBus, scheduler: NectarEconomyScheduler, reward: RewardEngine):
         self.repository = repository
         self.event_bus = event_bus
         self.scheduler = scheduler
@@ -62,6 +65,7 @@ class HiveSwarmService:
     async def emit_signal(self, signal: SignalCreate) -> str:
         if not self.reward.within_budget(signal):
             signal = SignalCreate(**{**signal.model_dump(), "kind": SignalKind.warning, "summary": "signal over nectar budget"})
+    async def emit_signal(self, signal: SignalCreate) -> str:
         signal_id = uuid.uuid4().hex
         await self.repository.create_signal(
             signal_id=signal_id,
@@ -108,6 +112,16 @@ class HiveSwarmService:
         task = await self.repository.assign_task(selected_task_id, role.name)
         if task is None:
             return None
+        queued = await self.repository.list_tasks_by_state(TaskState.discovered)
+        if not queued:
+            queued = await self.repository.list_tasks_by_state(TaskState.planned)
+        if not queued:
+            return None
+        budget = self.scheduler.budget_for_role(global_budget=global_budget, role=role.name, queued_tasks=len(queued))
+        if budget <= 0:
+            return None
+        task = queued[0]
+        await self.repository.assign_task(task.task_id, role.name)
         await self.event_bus.publish(
             CloudEvent(
                 id=uuid.uuid4().hex,
@@ -161,3 +175,17 @@ class HiveSwarmService:
             )
         )
         return {"status": "approved", "content_sha256": content_hash}
+    async def publish_artifact_result(self, task_id: str, agent_id: str, content: str, approved: bool) -> None:
+        state = TaskState.done if approved else TaskState.active
+        await self.repository.update_task_state(task_id, state)
+        event_type = "hive.artifact.approved" if approved else "hive.artifact.rejected"
+        await self.event_bus.publish(
+            CloudEvent(
+                id=uuid.uuid4().hex,
+                type=event_type,
+                source=agent_id,
+                time=utc_now(),
+                subject=task_id,
+                data={"task_id": task_id, "content": content},
+            )
+        )

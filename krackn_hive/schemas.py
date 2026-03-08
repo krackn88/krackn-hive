@@ -1,27 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-try:
-    from pydantic import BaseModel, ConfigDict, Field
-except ModuleNotFoundError:  # lightweight fallback for constrained test envs
-    class BaseModel:  # type: ignore[override]
-        def __init__(self, **kwargs):
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-
-        def model_dump(self, mode: str | None = None):
-            return self.__dict__.copy()
-
-    def Field(default=None, default_factory=None, ge=None, le=None):  # type: ignore
-        if default_factory is not None:
-            return default_factory()
-        return default
-
-    def ConfigDict(**kwargs):  # type: ignore
-        return kwargs
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import AgentState, Caste, SignalKind, TaskState
 
@@ -53,10 +35,6 @@ class TaskCreate(BaseModel):
     constraints: dict[str, Any] = Field(default_factory=dict)
 
 
-class TaskTransition(BaseModel):
-    state: TaskState
-
-
 class TaskRead(BaseModel):
     task_id: str
     goal: str
@@ -71,18 +49,11 @@ class SignalCreate(BaseModel):
     task_id: str
     kind: SignalKind
     source_agent_id: str
-    score: float = Field(ge=0, le=1, default=0.5)
-    confidence: float = Field(ge=0, le=1, default=0.5)
+    score: float = Field(ge=0, le=1)
+    confidence: float = Field(ge=0, le=1)
     estimated_cost: EstimatedCost = Field(default_factory=EstimatedCost)
     payload: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
-
-
-class ArtifactSubmit(BaseModel):
-    producer_agent_id: str
-    kind: str = "patch"
-    content: str
-    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RoleCreate(BaseModel):
@@ -110,16 +81,3 @@ class AgentRead(BaseModel):
     caste: Caste
     state: AgentState
     capabilities: list[str]
-
-
-class HiveSummary(BaseModel):
-    discovered: int = 0
-    triaged: int = 0
-    planned: int = 0
-    assigned: int = 0
-    active: int = 0
-    review: int = 0
-    done: int = 0
-    blocked: int = 0
-    rejected: int = 0
-    archived: int = 0

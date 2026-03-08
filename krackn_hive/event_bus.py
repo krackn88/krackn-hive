@@ -59,11 +59,7 @@ class RedisDanceFloorEventBus:
         self.channel = channel
 
     async def publish(self, event: CloudEvent) -> None:
-        if hasattr(event, "model_dump_json"):
-            payload = event.model_dump_json()
-        else:
-            payload = json.dumps(event.model_dump())
-        await self.redis.publish(self.channel, payload)
+        await self.redis.publish(self.channel, event.model_dump_json())
 
     async def subscribe(self, pattern: str) -> AsyncIterator[CloudEvent]:
         pubsub = self.redis.pubsub()
@@ -75,11 +71,7 @@ class RedisDanceFloorEventBus:
                 data = message.get("data")
                 if isinstance(data, bytes):
                     data = data.decode("utf-8")
-                payload = json.loads(data)
-                if hasattr(CloudEvent, "model_validate"):
-                    parsed = CloudEvent.model_validate(payload)
-                else:
-                    parsed = CloudEvent(**payload)
+                parsed = CloudEvent.model_validate(json.loads(data))
                 if fnmatch.fnmatch(parsed.type, pattern):
                     yield parsed
         finally:

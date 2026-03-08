@@ -44,7 +44,11 @@ async def deps(session: AsyncSession = Depends(get_session)) -> tuple[HiveSwarmS
     return swarm, repo, registry, abandonment
 
 
-def _task_read(task) -> TaskRead:
+@router.post("/tasks", response_model=TaskRead)
+async def create_task(data: TaskCreate, bundle=Depends(deps)) -> TaskRead:
+    swarm, repo, _, _ = bundle
+    task_id = await swarm.submit_task(goal=data.goal, priority=data.priority, constraints=data.constraints)
+    task = await repo.get_task(task_id)
     return TaskRead(
         task_id=task.task_id,
         goal=task.goal,
@@ -56,27 +60,6 @@ def _task_read(task) -> TaskRead:
     )
 
 
-@router.post("/tasks", response_model=TaskRead)
-async def create_task(data: TaskCreate, bundle=Depends(deps)) -> TaskRead:
-    swarm, repo, _, _ = bundle
-    task_id = await swarm.submit_task(goal=data.goal, priority=data.priority, constraints=data.constraints)
-    task = await repo.get_task(task_id)
-    return _task_read(task)
-
-
-@router.post("/tasks/{task_id}/transition")
-async def transition_task(task_id: str, data: TaskTransition, bundle=Depends(deps)) -> dict[str, str]:
-    swarm, repo, _, _ = bundle
-    task = await repo.get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="task not found")
-    try:
-        state = await swarm.transition_task(task_id, data.state)
-    except InvalidTransitionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    return {"task_id": task_id, "state": state.value}
-
-
 @router.post("/signals")
 async def emit_signal(data: SignalCreate, bundle=Depends(deps)) -> dict[str, str]:
     swarm, repo, _, _ = bundle
@@ -85,18 +68,6 @@ async def emit_signal(data: SignalCreate, bundle=Depends(deps)) -> dict[str, str
         raise HTTPException(status_code=404, detail="task not found")
     signal_id = await swarm.emit_signal(data)
     return {"signal_id": signal_id}
-
-
-@router.post("/tasks/{task_id}/artifacts")
-async def submit_artifact(task_id: str, data: ArtifactSubmit, bundle=Depends(deps)) -> dict[str, str]:
-    swarm, repo, _, _ = bundle
-    task = await repo.get_task(task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="task not found")
-    try:
-        return await swarm.submit_artifact(task_id, data)
-    except InvalidTransitionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.post("/roles", response_model=RoleRead)
@@ -123,12 +94,6 @@ async def register_agent(data: AgentRegister, bundle=Depends(deps)) -> AgentRead
     _, repo, _, _ = bundle
     agent = await repo.register_agent(data.agent_id, data.caste, data.capabilities, data.sandbox_profile)
     return AgentRead(agent_id=agent.agent_id, caste=agent.caste, state=agent.state, capabilities=agent.capabilities_json)
-
-
-@router.get("/summary", response_model=HiveSummary)
-async def summary(bundle=Depends(deps)) -> HiveSummary:
-    _, repo, _, _ = bundle
-    return HiveSummary(**await repo.task_summary())
 
 
 @router.post("/abandonment/sweep")
